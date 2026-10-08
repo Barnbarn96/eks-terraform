@@ -1,0 +1,19 @@
+# Terraform working files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variable files can hold emails / account details; commit the .example instead
+*.tfvars
+!*.tfvars.example
+
+# Local kubeconfigs and session notes
+kubeconfig*
+*.local.md

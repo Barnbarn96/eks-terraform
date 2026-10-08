@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) and fill in
+budget_email = "you@example.com"
+
+# Optional overrides
+# region                      = "us-east-1"
+# budget_limit_usd            = 50
+# budget_alert_thresholds_usd = [10, 25, 50]

@@ -1,0 +1,11 @@
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      project    = "eks-lab"
+      managed-by = "terraform"
+      component  = "bootstrap"
+    }
+  }
+}
