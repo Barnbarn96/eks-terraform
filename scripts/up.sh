@@ -25,4 +25,12 @@ echo "==> Waiting for nodes to be Ready"
 kubectl wait --for=condition=Ready nodes --all --timeout=10m
 kubectl get nodes -o wide
 
+echo "==> ArgoCD applications (add-ons keep syncing for a few more minutes)"
+kubectl -n argocd get applications 2>/dev/null || true
+cat <<'EOF'
+    Watch:    kubectl -n argocd get applications -w
+    UI:       kubectl -n argocd port-forward svc/argocd-server 8080:80   -> http://localhost:8080
+    Password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+EOF
+
 echo "==> Up in $(( ($(date +%s) - start) / 60 )) min. Remember: ./scripts/down.sh before you stop."

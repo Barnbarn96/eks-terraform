@@ -22,6 +22,12 @@ variable "azs" {
   default     = ["us-east-1a", "us-east-1b"]
 }
 
+variable "gitops_repo_url" {
+  description = "Public gitops repo ArgoCD syncs from"
+  type        = string
+  default     = "https://github.com/Barnbarn96/eks-platform-gitops.git"
+}
+
 variable "endpoint_public_access_cidrs" {
   description = "CIDRs allowed to reach the EKS public API endpoint"
   type        = list(string)

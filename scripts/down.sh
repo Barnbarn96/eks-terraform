@@ -17,6 +17,15 @@ if [[ -n "$CLUSTER" ]] && kubectl --context "$CLUSTER" get nodes >/dev/null 2>&1
   # first, or `terraform destroy` hangs on the VPC (ENIs / security groups).
   KUBECTL="kubectl --context $CLUSTER"
 
+  # Stop ArgoCD first: with selfHeal on it would re-create everything we
+  # delete below. The controllers it installed (LB controller, Karpenter)
+  # keep running, which we need: they're what removes the AWS resources.
+  if $KUBECTL get ns argocd >/dev/null 2>&1; then
+    echo "==> Pausing ArgoCD (scaling application controller to 0)"
+    $KUBECTL -n argocd scale statefulset argocd-application-controller --replicas=0 || true
+    $KUBECTL -n argocd rollout status statefulset argocd-application-controller --timeout=2m || true
+  fi
+
   echo "==> Deleting Ingresses (ALBs) and LoadBalancer Services (NLBs)"
   $KUBECTL delete ingress --all -A --wait=true --timeout=5m || true
   $KUBECTL get svc -A -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' |
@@ -29,6 +38,9 @@ if [[ -n "$CLUSTER" ]] && kubectl --context "$CLUSTER" get nodes >/dev/null 2>&1
     echo "==> Deleting Karpenter NodePools and waiting for their nodes to go"
     $KUBECTL delete nodepools --all --wait=true --timeout=10m || true
     $KUBECTL wait --for=delete nodeclaims --all --timeout=10m || true
+    # Karpenter creates an IAM instance profile per EC2NodeClass and removes
+    # it via the EC2NodeClass finalizer; skip this and the profile leaks
+    $KUBECTL delete ec2nodeclasses --all --wait=true --timeout=5m || true
   fi
 
   echo "==> Deleting PVCs (releases EBS volumes)"

@@ -67,6 +67,19 @@ check "VPCs tagged project=eks-lab" \
       --filters "Name=tag:project,Values=eks-lab" \
       --query 'Vpcs[].VpcId' --output text)"
 
+# EKS can recreate its log group after destroy while logs are still flushing;
+# if it does, it comes back with no retention and keeps storing data
+check "EKS control plane log groups" \
+  "$(aws logs describe-log-groups --region "$REGION" \
+      --log-group-name-prefix "/aws/eks/$CLUSTER/" \
+      --query 'logGroups[].logGroupName' --output text)"
+
+# Karpenter-created instance profiles are named <cluster>_<hash>
+check "Karpenter instance profiles" \
+  "$(aws iam list-instance-profiles \
+      --query "InstanceProfiles[?starts_with(InstanceProfileName, '${CLUSTER}_')].InstanceProfileName" \
+      --output text)"
+
 # Phase 2+: ExternalDNS records. Hosted zone itself is long-lived (bootstrap).
 # TODO: list A/AAAA/TXT records owned by ExternalDNS once the domain exists.
 
