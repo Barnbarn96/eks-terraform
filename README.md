@@ -3,6 +3,9 @@
 Terraform for an ephemeral, production-shaped EKS lab (VPC, EKS, IAM, ArgoCD bootstrap).
 Cluster state lives in the companion `eks-platform-gitops` repo.
 
+The full project plan (phases, cost guardrails, session runbook, templates) is in
+[docs/project-plan.md](docs/project-plan.md).
+
 ## Layout
 
 | Path | What |
@@ -11,7 +14,7 @@ Cluster state lives in the companion `eks-platform-gitops` repo.
 | `envs/lab/` | The ephemeral lab environment (remote state in S3). |
 | `modules/` | `network`, `cluster`, `platform-iam`, `argocd-bootstrap` (added from Phase 1). |
 | `scripts/` | `up.sh`, `down.sh`, `leak-check.sh` (added from Phase 1). |
-| `docs/` | ADRs, runbooks, postmortems, upgrade log. |
+| `docs/` | Project plan, ADRs, runbooks, postmortems, upgrade log. |
 
 ## First-time setup (Phase 0)
 
