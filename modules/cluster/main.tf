@@ -94,15 +94,19 @@ module "eks" {
         "node-role" = "system"
       }
 
-      # Optional: uncomment to keep app pods off these nodes once Karpenter
-      # exists. Every platform add-on then needs a matching toleration.
-      # taints = {
-      #   critical_addons = {
-      #     key    = "CriticalAddonsOnly"
-      #     value  = "true"
-      #     effect = "NO_SCHEDULE"
-      #   }
-      # }
+      # Keep app pods off the system nodes: they land on Karpenter capacity.
+      # Every platform add-on tolerates this taint AND selects
+      # node-role=system (tolerating alone only allows these nodes, it doesn't
+      # require them). See the gitops repo's platform/*/values.yaml and the
+      # argocd-bootstrap module. CoreDNS and the EBS CSI controller (EKS
+      # managed add-ons) tolerate CriticalAddonsOnly by default.
+      taints = {
+        critical_addons = {
+          key    = "CriticalAddonsOnly"
+          value  = "true"
+          effect = "NO_SCHEDULE"
+        }
+      }
 
       update_config = {
         max_unavailable = 1

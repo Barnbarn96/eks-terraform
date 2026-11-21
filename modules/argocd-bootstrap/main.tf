@@ -17,6 +17,12 @@ resource "helm_release" "argocd" {
     global = {
       # Keep ArgoCD on the stable system nodes, not on spot capacity
       nodeSelector = { "node-role" = "system" }
+      # The system nodes carry CriticalAddonsOnly=true:NoSchedule
+      tolerations = [{
+        key      = "CriticalAddonsOnly"
+        operator = "Exists"
+        effect   = "NoSchedule"
+      }]
     }
 
     configs = {
