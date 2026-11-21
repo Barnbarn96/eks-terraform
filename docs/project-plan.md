@@ -49,12 +49,13 @@ flowchart TB
         end
       end
     end
-    R53["Route 53 hosted zone"]
+    R53["Route 53 hosted zone: lab.thisisadomain.men"]
     SM["Secrets Manager + KMS"]
     ECR["ECR"]
     S3["S3 (Terraform state)"]
   end
 
+  CF["Cloudflare: thisisadomain.men (registrar + apex DNS)"] -->|NS delegation for lab.| R53
   GH["GitHub: gitops repo"] -->|sync| ARGO["ArgoCD (in cluster)"]
   ARGO --> EKS
   ALB --> KARP
@@ -68,6 +69,7 @@ flowchart TB
 
 - **System node group + Karpenter.** A small managed node group runs ArgoCD, Karpenter, CoreDNS, and controllers (this avoids the problem of Karpenter needing a node to run on). App workloads land on Karpenter spot nodes.
 - **EKS Pod Identity as default, IRSA for one controller.** Pod Identity is the newer approach. Using IRSA for one component (e.g. ExternalDNS) means you can explain both, since many production clusters still run IRSA.
+- **DNS split: Cloudflare for the apex, Route 53 for `lab.`.** The domain `thisisadomain.men` is registered at Cloudflare, and the apex stays there (it hosts redirects like `/linkedin`). The `lab.thisisadomain.men` subdomain is delegated to a Route 53 hosted zone with 4 `NS` records in Cloudflare. ExternalDNS and cert-manager only touch Route 53, so the lab keeps its AWS/IAM story and can never break the apex. This is how many companies split DNS ownership between teams.
 - **Single NAT gateway.** A cost trade-off. Note in an ADR that production would use one per AZ, and explain why.
 - **Start one minor version behind latest.** This leaves room for a real upgrade in Phase 5. Avoid versions in *extended support*, which charge a much higher control-plane rate.
 
@@ -143,7 +145,7 @@ Approximate figures; check current AWS pricing for your region before starting. 
 | System nodes (2x t3.medium / t4g.medium) | ~US$0.08–0.10/hr total on-demand | Graviton (t4g) is cheaper if your images are multi-arch |
 | Karpenter spot nodes | Usually cents per hour | Cap with NodePool `limits` |
 | ALB | ~US$0.02/hr + LCU | Only while an Ingress exists |
-| Route 53 hosted zone | US$0.50/month | Plus a cheap domain (~US$10–15/yr) |
+| Route 53 hosted zone (`lab.` subdomain) | US$0.50/month | The domain itself is at Cloudflare (registrar fee only) |
 | Secrets Manager | US$0.40/secret/month | Keep to 1–2 secrets |
 | S3 state, ECR | Pennies | |
 
@@ -167,7 +169,8 @@ Estimated at ~2 sessions per week. Adjust to your pace.
 
 - [ ] Dedicated AWS account (or at least a dedicated IAM Identity Center user with MFA). Never use root.
 - [ ] `bootstrap/`: S3 state bucket (versioning + encryption, `use_lockfile = true`), budget alarms
-- [ ] Register a domain and create a Route 53 hosted zone (this one stays up; it costs almost nothing)
+- [x] Register a domain: `thisisadomain.men` at Cloudflare. The Route 53 hosted zone for `lab.` is created in Phase 3, when something first needs it.
+- [ ] Account prerequisites in `bootstrap/`: the EC2 Spot service-linked role (`spot.amazonaws.com`). Without it, every Karpenter spot launch fails and silently falls back to on-demand; see PM-001.
 - [ ] Optional: GitHub Actions OIDC role so `terraform plan` runs on PRs. Strong signal, low effort.
 - [ ] Write **ADR-001: Why ephemeral lab, what's out of scope**
 
@@ -181,7 +184,7 @@ Estimated at ~2 sessions per week. Adjust to your pace.
 - [ ] `cluster` module:
   - EKS one minor version behind latest
   - **Access entries** (not the old `aws-auth` ConfigMap) for your admin role
-  - Managed node group `system`: 2 nodes, on-demand, taint `CriticalAddonsOnly` (optional)
+  - Managed node group `system`: 2 nodes, on-demand, label `node-role=system`, taint `CriticalAddonsOnly=true:NoSchedule`. Every platform add-on tolerates the taint and selects the label, so app pods can only land on Karpenter nodes.
   - EKS managed add-ons: `vpc-cni`, `coredns`, `kube-proxy`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`
   - Control plane logging: `api`, `audit`, `authenticator` to CloudWatch (short retention)
 - [ ] Pin every provider and module version
@@ -200,15 +203,15 @@ Estimated at ~2 sessions per week. Adjust to your pace.
   - AWS Load Balancer Controller
   - Karpenter (plus node IAM role, instance profile, SQS interruption queue + EventBridge rules)
   - External Secrets (read-only to `eks-lab/*` secrets + KMS decrypt)
-  - cert-manager (Route 53 for DNS-01)
   - EBS CSI driver
-  - **ExternalDNS via IRSA** (deliberately, to learn both)
 - [ ] In the gitops repo, add each add-on as an ArgoCD Application with pinned chart versions. Use **sync waves** so CRDs and controllers come up before resources that depend on them.
 - [ ] Karpenter `NodePool` (spot + on-demand fallback, CPU `limits` as a cost cap, consolidation enabled) and `EC2NodeClass`
-- [ ] cert-manager `ClusterIssuer`s: Let's Encrypt **staging** first, then production (staging avoids rate limits while you debug)
+- [ ] cert-manager installed (controller only; its DNS-01 IAM and `ClusterIssuer`s move to Phase 3)
 - [ ] `metrics-server`, `kube-prometheus-stack` (Grafana not exposed publicly; use port-forward)
 
-**Done when:** all ArgoCD apps are Healthy/Synced after a fresh `up.sh` with no manual steps.
+Moved to Phase 3: everything that needs the domain (Route 53 zone, cert-manager DNS-01 IAM + `ClusterIssuer`s, ExternalDNS). None of it does anything until an app has an Ingress, and one Ingress tests the whole DNS → ALB → TLS path at once.
+
+**Done when:** all ArgoCD apps are Healthy/Synced after a fresh `up.sh` with no manual steps. ✅ First passed 2026-11-21 (see PM-001 and PM-002 for what that run found).
 
 **Learning checkpoints:** how Pod Identity and IRSA differ in mechanism (agent vs OIDC token exchange); why sync waves matter; how Karpenter decides instance types.
 
@@ -218,6 +221,15 @@ Estimated at ~2 sessions per week. Adjust to your pace.
 
 Add `gitops/apps/kind-api/overlays/eks/` to the `nodejs_with_kind` repo, reusing its existing `base/`, and bring it up to production standard. Then register it on the cluster with `argocd-apps/apps/kind-api.yaml` in the platform repo. That file's `repoURL` should point at `nodejs_with_kind` and its `path` at `gitops/apps/kind-api/overlays/eks`.
 
+**DNS and TLS first (moved from Phases 0 and 2):**
+- [ ] `bootstrap/`: Route 53 hosted zone for `lab.thisisadomain.men` (long-lived, survives teardown)
+- [ ] Cloudflare: add 4 `NS` records for `lab` pointing at the zone's Route 53 name servers. Verify with `nslookup -type=NS lab.thisisadomain.men`.
+- [ ] `platform-iam`: cert-manager Pod Identity role (Route 53 DNS-01, scoped to the `lab.` zone) and **ExternalDNS via IRSA** (deliberately, to learn both)
+- [ ] gitops: ExternalDNS Application (`domainFilters: [lab.thisisadomain.men]`, `policy: sync`, TXT ownership registry)
+- [ ] gitops: cert-manager `ClusterIssuer`s, Let's Encrypt **staging** first, then production (staging avoids rate limits while you debug)
+- [ ] `leak-check.sh`: fill in the ExternalDNS record check, and test it by leaving a record behind on purpose
+
+**The app:**
 - [ ] Decide how to handle the base's Argo Rollouts `Rollout`: either add Argo Rollouts as a platform add-on, or patch it to a `Deployment` in the EKS overlay
 - [ ] Extend the app repo's CI tag-bump step so a new image also updates `overlays/eks`
 - [ ] Image in ECR, pinned by digest or immutable tag
@@ -232,7 +244,7 @@ Add `gitops/apps/kind-api/overlays/eks/` to the `nodejs_with_kind` repo, reusing
 - [ ] `securityContext`: non-root, read-only root FS, drop all capabilities
 - [ ] `NetworkPolicy` (requires enabling network policy in the VPC CNI add-on). Default-deny plus explicit allows.
 
-**Done when:** `https://demo.<yourdomain>` serves over valid TLS and survives a rolling deploy with zero failed requests (verify with a load tool such as `k6` or `hey` running during the deploy).
+**Done when:** `https://demo.lab.thisisadomain.men` serves over valid TLS and survives a rolling deploy with zero failed requests (verify with a load tool such as `k6` or `hey` running during the deploy).
 
 ---
 
@@ -328,7 +340,7 @@ Optional stretch: run a drill "blind" by writing a script that injects a random 
 **Spin-up (target < 25 min)**
 1. `./scripts/up.sh` (Terraform apply, update kubeconfig)
 2. Wait for ArgoCD root app to be Synced/Healthy
-3. Confirm `https://demo.<domain>` responds
+3. Confirm `https://demo.lab.thisisadomain.men` responds (from Phase 3)
 4. Note the start time in the session log
 
 **Teardown (never skip)**
