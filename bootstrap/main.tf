@@ -136,3 +136,17 @@ resource "aws_budgets_budget" "lab" {
     subscriber_email_addresses = [var.budget_email]
   }
 }
+
+# -----------------------------------------------------------------------------
+# EC2 Spot service-linked role (account-wide, one-time)
+# -----------------------------------------------------------------------------
+# EC2 needs this role before anything can launch spot instances. The console
+# creates it on first use, but an account managed only through Terraform never
+# gets it. Karpenter's role is (rightly) not allowed to create IAM roles, so
+# without this every spot launch fails with ServiceLinkedRoleCreationNotPermitted
+# and Karpenter silently falls back to on-demand. Lives here, not envs/lab,
+# because it must survive every lab teardown.
+resource "aws_iam_service_linked_role" "spot" {
+  aws_service_name = "spot.amazonaws.com"
+  description      = "Lets EC2 launch spot instances (needed by Karpenter)"
+}
