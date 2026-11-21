@@ -9,6 +9,18 @@ REGION="${AWS_REGION:-us-east-1}"
 CLUSTER="${CLUSTER_NAME:-eks-lab}"
 found=0
 
+# Git Bash rewrites arguments that look like Unix paths (e.g. /aws/eks/...)
+# into Windows paths, which breaks the log group check. Turn that off.
+export MSYS_NO_PATHCONV=1
+
+# Each check runs in a subshell, so record AWS CLI failures in a file. Without
+# this, a failed call returns empty output and gets reported as "ok".
+errfile="$(mktemp)"
+trap 'rm -f "$errfile"' EXIT
+aws() {
+  command aws "$@" || { echo "aws $1 $2 failed" >>"$errfile"; return 1; }
+}
+
 check() {
   local label="$1" output="$2"
   if [[ -n "$output" && "$output" != "None" ]]; then
@@ -82,6 +94,12 @@ check "Karpenter instance profiles" \
 
 # Phase 2+: ExternalDNS records. Hosted zone itself is long-lived (bootstrap).
 # TODO: list A/AAAA/TXT records owned by ExternalDNS once the domain exists.
+
+if [[ -s "$errfile" ]]; then
+  echo "==> CHECKS FAILED to run, so results are incomplete:"
+  sed 's/^/        /' "$errfile"
+  exit 2
+fi
 
 if [[ $found -eq 1 ]]; then
   echo "==> LEAKS FOUND. Clean them up before you walk away."
